@@ -69,6 +69,8 @@ func TestRun(t *testing.T) {
 		require.NoError(t, apitest.MockDockerLogs(utils.Docker, "test-migra", diff))
 		// Setup mock postgres
 		conn := pgtest.NewConn()
+		conn.Query(CREATE_TEMPLATE).
+			Reply("CREATE DATABASE")
 		defer conn.Close(t)
 		// Run test
 		err := Run(context.Background(), []string{"public"}, "file", dbConfig, DiffSchemaMigra, fsys, conn.Intercept)
@@ -83,20 +85,6 @@ func TestRun(t *testing.T) {
 		contents, err := afero.ReadFile(fsys, diffPath)
 		assert.NoError(t, err)
 		assert.Equal(t, []byte(diff), contents)
-	})
-
-	t.Run("throws error on failure to load user schemas", func(t *testing.T) {
-		// Setup in-memory fs
-		fsys := afero.NewMemMapFs()
-		// Setup mock postgres
-		conn := pgtest.NewConn()
-		defer conn.Close(t)
-		conn.Query(migration.ListSchemas, migration.ManagedSchemas).
-			ReplyError(pgerrcode.DuplicateTable, `relation "test" already exists`)
-		// Run test
-		err := Run(context.Background(), []string{}, "", dbConfig, DiffSchemaMigra, fsys, conn.Intercept)
-		// Check error
-		assert.ErrorContains(t, err, `ERROR: relation "test" already exists (SQLSTATE 42P07)`)
 	})
 
 	t.Run("throws error on failure to diff target", func(t *testing.T) {
@@ -134,7 +122,9 @@ func TestMigrateShadow(t *testing.T) {
 		conn.Query(utils.GlobalsSql).
 			Reply("CREATE SCHEMA").
 			Query(utils.InitialSchemaPg14Sql).
-			Reply("CREATE SCHEMA")
+			Reply("CREATE SCHEMA").
+			Query(CREATE_TEMPLATE).
+			Reply("CREATE DATABASE")
 		helper.MockMigrationHistory(conn).
 			Query(sql).
 			Reply("CREATE SCHEMA").
@@ -268,7 +258,7 @@ func TestDiffDatabase(t *testing.T) {
 		// Check error
 		assert.Empty(t, diff)
 		assert.ErrorContains(t, err, `ERROR: schema "public" already exists (SQLSTATE 42P06)
-At statement 0:
+At statement: 0
 create schema public`)
 		assert.Empty(t, apitest.ListUnmatchedRequests())
 	})
@@ -308,7 +298,9 @@ create schema public`)
 		conn.Query(utils.GlobalsSql).
 			Reply("CREATE SCHEMA").
 			Query(utils.InitialSchemaPg14Sql).
-			Reply("CREATE SCHEMA")
+			Reply("CREATE SCHEMA").
+			Query(CREATE_TEMPLATE).
+			Reply("CREATE DATABASE")
 		helper.MockMigrationHistory(conn).
 			Query(sql).
 			Reply("CREATE SCHEMA").

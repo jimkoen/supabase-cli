@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/supabase/cli/internal/debug"
 	"github.com/supabase/cli/internal/utils"
 	"github.com/supabase/cli/internal/utils/flags"
 	"golang.org/x/mod/semver"
@@ -109,12 +111,12 @@ var (
 					}
 				}
 			}
-			if err := flags.ParseDatabaseConfig(cmd.Flags(), fsys); err != nil {
+			if err := flags.ParseDatabaseConfig(ctx, cmd.Flags(), fsys); err != nil {
 				return err
 			}
 			// Prepare context
 			if viper.GetBool("DEBUG") {
-				ctx = utils.WithTraceContext(ctx)
+				http.DefaultTransport = debug.NewTransport()
 				fmt.Fprintln(os.Stderr, cmd.Root().Short)
 			}
 			cmd.SetContext(ctx)
@@ -198,6 +200,9 @@ func recoverAndExit() {
 			!viper.GetBool("DEBUG") {
 			utils.CmdSuggestion = utils.SuggestDebugFlag
 		}
+		if e, ok := err.(*errors.Error); ok && len(utils.Version) == 0 {
+			fmt.Fprintln(os.Stderr, string(e.Stack()))
+		}
 		msg = err.Error()
 	default:
 		msg = fmt.Sprintf("%#v", err)
@@ -227,6 +232,7 @@ func init() {
 	})
 
 	flags := rootCmd.PersistentFlags()
+	flags.Bool("yes", false, "answer yes to all prompts")
 	flags.Bool("debug", false, "output debug logs to stderr")
 	flags.String("workdir", "", "path to a Supabase project directory")
 	flags.Bool("experimental", false, "enable experimental features")

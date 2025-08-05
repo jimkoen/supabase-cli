@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/afero"
 	"github.com/spf13/viper"
 	"github.com/supabase/cli/internal/utils"
-	"github.com/supabase/cli/pkg/api"
 	"github.com/supabase/cli/pkg/function"
 )
 
@@ -26,7 +25,7 @@ func NewDockerBundler(fsys afero.Fs) function.EszipBundler {
 	return &dockerBundler{fsys: fsys}
 }
 
-func (b *dockerBundler) Bundle(ctx context.Context, slug, entrypoint, importMap string, staticFiles []string, output io.Writer) (api.FunctionDeployMetadata, error) {
+func (b *dockerBundler) Bundle(ctx context.Context, slug, entrypoint, importMap string, staticFiles []string, output io.Writer) (function.FunctionDeployMetadata, error) {
 	meta := function.NewMetadata(slug, entrypoint, importMap, staticFiles)
 	fmt.Fprintln(os.Stderr, "Bundling Function:", utils.Bold(slug))
 	cwd, err := os.Getwd()
@@ -60,6 +59,7 @@ func (b *dockerBundler) Bundle(ctx context.Context, slug, entrypoint, importMap 
 	if viper.GetBool("DEBUG") {
 		cmd = append(cmd, "--verbose")
 	}
+	cmd = append(cmd, function.BundleFlags...)
 
 	env := []string{}
 	if custom_registry := os.Getenv("NPM_CONFIG_REGISTRY"); custom_registry != "" {
@@ -122,41 +122,17 @@ func GetBindMounts(cwd, hostFuncDir, hostOutputDir, hostEntrypointPath, hostImpo
 			binds = append(binds, hostOutputDir+":"+dockerOutputDir+":rw")
 		}
 	}
-	// Allow entrypoints outside the functions directory
-	hostEntrypointDir := filepath.Dir(hostEntrypointPath)
-	if len(hostEntrypointDir) > 0 {
-		if !filepath.IsAbs(hostEntrypointDir) {
-			hostEntrypointDir = filepath.Join(cwd, hostEntrypointDir)
-		}
-		if !strings.HasSuffix(hostEntrypointDir, sep) {
-			hostEntrypointDir += sep
-		}
-		if !strings.HasPrefix(hostEntrypointDir, hostFuncDir) &&
-			!strings.HasPrefix(hostEntrypointDir, hostOutputDir) {
-			dockerEntrypointDir := utils.ToDockerPath(hostEntrypointDir)
-			binds = append(binds, hostEntrypointDir+":"+dockerEntrypointDir+":ro")
-		}
+	// Imports outside of ./supabase/functions will be bound by walking the entrypoint
+	modules, err := utils.BindHostModules(cwd, hostEntrypointPath, hostImportMapPath, fsys)
+	if err != nil {
+		return nil, err
 	}
-	// Imports outside of ./supabase/functions will be bound by absolute path
-	if len(hostImportMapPath) > 0 {
-		if !filepath.IsAbs(hostImportMapPath) {
-			hostImportMapPath = filepath.Join(cwd, hostImportMapPath)
-		}
-		importMap, err := utils.NewImportMap(hostImportMapPath, fsys)
-		if err != nil {
-			return nil, err
-		}
-		modules := importMap.BindHostModules()
-		dockerImportMapPath := utils.ToDockerPath(hostImportMapPath)
-		modules = append(modules, hostImportMapPath+":"+dockerImportMapPath+":ro")
-		// Remove any duplicate mount points
-		for _, mod := range modules {
-			hostPath := strings.Split(mod, ":")[0]
-			if !strings.HasPrefix(hostPath, hostFuncDir) &&
-				(len(hostOutputDir) == 0 || !strings.HasPrefix(hostPath, hostOutputDir)) &&
-				(len(hostEntrypointDir) == 0 || !strings.HasPrefix(hostPath, hostEntrypointDir)) {
-				binds = append(binds, mod)
-			}
+	// Remove any duplicate mount points
+	for _, mod := range modules {
+		hostPath := strings.Split(mod, ":")[0]
+		if !strings.HasPrefix(hostPath, hostFuncDir) &&
+			(len(hostOutputDir) == 0 || !strings.HasPrefix(hostPath, hostOutputDir)) {
+			binds = append(binds, mod)
 		}
 	}
 	return binds, nil

@@ -1,6 +1,21 @@
 do $$ declare
   rec record;
 begin
+  -- schemas
+  for rec in
+    select pn.*
+    from pg_namespace pn
+    left join pg_depend pd on pd.objid = pn.oid
+    where pd.deptype is null
+      and not pn.nspname like any(array['information\_schema', 'pg\_%', '\_analytics', '\_realtime', '\_supavisor', 'pgbouncer', 'pgmq', 'pgsodium', 'pgtle', 'supabase\_migrations', 'vault', 'extensions', 'public'])
+      and pn.nspowner::regrole::text != 'supabase_admin'
+  loop
+    -- If an extension uses a schema it doesn't create, dropping the schema will cascade to also
+    -- drop the extension. But if an extension creates its own schema, dropping the schema will
+    -- throw an error. Hence, we drop schemas first while excluding those created by extensions.
+    execute format('drop schema if exists %I cascade', rec.nspname);
+  end loop;
+
   -- extensions
   for rec in
     select *
@@ -42,7 +57,7 @@ begin
     execute format('drop materialized view if exists %I.%I cascade', rec.relnamespace::regnamespace::name, rec.relname);
   end loop;
 
-  -- tables (cascade to views)
+  -- tables (cascade to dependent objects)
   for rec in
     select *
     from pg_class c
@@ -55,18 +70,17 @@ begin
     execute format('drop table if exists %I.%I cascade', rec.relnamespace::regnamespace::name, rec.relname);
   end loop;
 
-  -- truncate tables in auth, storage, webhooks, and migrations schema
+  -- truncate tables in auth, webhooks, and migrations schema
   for rec in
     select *
     from pg_class c
     where
       (c.relnamespace::regnamespace::name = 'auth' and c.relname != 'schema_migrations'
-      or c.relnamespace::regnamespace::name = 'storage' and c.relname != 'migrations'
       or c.relnamespace::regnamespace::name = 'supabase_functions' and c.relname != 'migrations'
       or c.relnamespace::regnamespace::name = 'supabase_migrations')
       and c.relkind = 'r'
   loop
-    execute format('truncate %I.%I restart identity cascade', rec.relnamespace::regnamespace::name, rec.relname);
+    execute format('truncate %I.%I cascade', rec.relnamespace::regnamespace::name, rec.relname);
   end loop;
 
   -- sequences
@@ -104,7 +118,7 @@ begin
     select *
     from pg_publication p
     where
-      p.pubname not like 'supabase_realtime%' and p.pubname not like 'realtime_messages%'
+      not p.pubname like any(array['supabase\_realtime%', 'realtime\_messages%'])
   loop
     execute format('drop publication if exists %I', rec.pubname);
   end loop;

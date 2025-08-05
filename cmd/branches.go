@@ -32,6 +32,7 @@ var (
 		Allowed: awsRegions(),
 	}
 	persistent bool
+	withData   bool
 
 	branchCreateCmd = &cobra.Command{
 		Use:   "create [name]",
@@ -48,10 +49,13 @@ var (
 				body.Region = &branchRegion.Value
 			}
 			if cmdFlags.Changed("size") {
-				body.DesiredInstanceSize = (*api.DesiredInstanceSize)(&size.Value)
+				body.DesiredInstanceSize = (*api.CreateBranchBodyDesiredInstanceSize)(&size.Value)
 			}
 			if cmdFlags.Changed("persistent") {
 				body.Persistent = &persistent
+			}
+			if cmdFlags.Changed("with-data") {
+				body.WithData = &withData
 			}
 			return create.Run(cmd.Context(), body, afero.NewOsFs())
 		},
@@ -157,6 +161,7 @@ func init() {
 	createFlags.Var(&branchRegion, "region", "Select a region to deploy the branch database.")
 	createFlags.Var(&size, "size", "Select a desired instance size for the branch database.")
 	createFlags.BoolVar(&persistent, "persistent", false, "Whether to create a persistent branch.")
+	createFlags.BoolVar(&withData, "with-data", false, "Whether to clone production data to the branch database.")
 	branchesCmd.AddCommand(branchCreateCmd)
 	branchesCmd.AddCommand(branchListCmd)
 	branchesCmd.AddCommand(branchGetCmd)
@@ -202,7 +207,7 @@ func promptBranchId(ctx context.Context, args []string, fsys afero.Fs) error {
 	} else if len(branches) == 0 {
 		return errors.Errorf("branch not found: %s", branchId)
 	} else if len(branches) == 1 {
-		branchId = branches[0].Id
+		branchId = branches[0].Id.String()
 		return nil
 	}
 	// Let user choose from a list of branches
@@ -210,7 +215,7 @@ func promptBranchId(ctx context.Context, args []string, fsys afero.Fs) error {
 	for i, branch := range branches {
 		items[i] = utils.PromptItem{
 			Summary: branch.Name,
-			Details: branch.Id,
+			Details: branch.Id.String(),
 		}
 	}
 	title := "Select a branch:"

@@ -3,9 +3,7 @@ package function
 import (
 	"bytes"
 	"context"
-	"embed"
 	"errors"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -15,66 +13,11 @@ import (
 
 	"github.com/h2non/gock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/supabase/cli/pkg/api"
 	"github.com/supabase/cli/pkg/cast"
 	"github.com/supabase/cli/pkg/config"
 )
-
-//go:embed testdata
-var testImports embed.FS
-
-type MockFS struct {
-	mock.Mock
-}
-
-func (m *MockFS) ReadFile(srcPath string, w io.Writer) error {
-	_ = m.Called(srcPath)
-	data, err := testImports.ReadFile(srcPath)
-	if err != nil {
-		return err
-	}
-	if _, err := w.Write(data); err != nil {
-		return err
-	}
-	return nil
-}
-
-func TestImportPaths(t *testing.T) {
-	t.Run("iterates all import paths", func(t *testing.T) {
-		// Setup in-memory fs
-		fsys := MockFS{}
-		fsys.On("ReadFile", "/modules/my-module.ts").Once()
-		fsys.On("ReadFile", "testdata/modules/imports.ts").Once()
-		fsys.On("ReadFile", "testdata/geometries/Geometries.js").Once()
-		// Run test
-		im := ImportMap{}
-		err := walkImportPaths("testdata/modules/imports.ts", im, fsys.ReadFile)
-		// Check error
-		assert.NoError(t, err)
-		fsys.AssertExpectations(t)
-	})
-
-	t.Run("iterates with import map", func(t *testing.T) {
-		// Setup in-memory fs
-		fsys := MockFS{}
-		fsys.On("ReadFile", "/modules/my-module.ts").Once()
-		fsys.On("ReadFile", "testdata/modules/imports.ts").Once()
-		fsys.On("ReadFile", "testdata/geometries/Geometries.js").Once()
-		fsys.On("ReadFile", "testdata/shared/whatever.ts").Once()
-		fsys.On("ReadFile", "testdata/shared/mod.ts").Once()
-		fsys.On("ReadFile", "testdata/nested/index.ts").Once()
-		// Run test
-		im := ImportMap{Imports: map[string]string{
-			"module-name/": "../shared/",
-		}}
-		err := walkImportPaths("testdata/modules/imports.ts", im, fsys.ReadFile)
-		// Check error
-		assert.NoError(t, err)
-		fsys.AssertExpectations(t)
-	})
-}
 
 func assertFormEqual(t *testing.T, actual []byte) {
 	snapshot := path.Join("testdata", path.Base(t.Name())+".form")
@@ -93,7 +36,7 @@ func TestWriteForm(t *testing.T) {
 		// Setup in-memory fs
 		fsys := testImports
 		// Run test
-		err := writeForm(form, api.FunctionDeployMetadata{
+		err := writeForm(form, FunctionDeployMetadata{
 			Name:           cast.Ptr("nested"),
 			VerifyJwt:      cast.Ptr(true),
 			EntrypointPath: "testdata/nested/index.ts",
@@ -112,7 +55,7 @@ func TestWriteForm(t *testing.T) {
 		// Setup in-memory fs
 		fsys := fs.MapFS{}
 		// Run test
-		err := writeForm(form, api.FunctionDeployMetadata{
+		err := writeForm(form, FunctionDeployMetadata{
 			ImportMapPath: cast.Ptr("testdata/import_map.json"),
 		}, fsys)
 		// Check error
@@ -126,7 +69,7 @@ func TestWriteForm(t *testing.T) {
 		// Setup in-memory fs
 		fsys := testImports
 		// Run test
-		err := writeForm(form, api.FunctionDeployMetadata{
+		err := writeForm(form, FunctionDeployMetadata{
 			StaticPatterns: cast.Ptr([]string{"testdata"}),
 		}, fsys)
 		// Check error
